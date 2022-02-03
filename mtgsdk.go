@@ -18,6 +18,7 @@ import (
 	"path"
 	"strconv"
 	"strings"
+	"sync"
 
 	"github.com/GrandOichii/appdata"
 	"github.com/GrandOichii/box"
@@ -519,11 +520,19 @@ func DownloadCardImages(params map[string]string, deckPath string, outPath strin
 	if err != nil {
 		return err
 	}
+	// create a wait group
+	wg := sync.WaitGroup{}
+	wg.Add(len(cards))
 	for _, card := range cards {
-		err = card.DownloadImage(outPath, quality)
-		if err != nil {
-			return err
-		}
+		c := card
+		go func() {
+			err = c.DownloadImage(outPath, quality)
+			wg.Done()
+		}()
+	}
+	wg.Wait()
+	if err != nil {
+		return err
 	}
 	return nil
 }
@@ -584,5 +593,3 @@ func ReadDeck(path string) (Deck, error) {
 	}
 	return result, nil
 }
-
-// comment
