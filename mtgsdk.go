@@ -282,6 +282,10 @@ func (c Card) DownloadImage(outPath string, quality int) error {
 	if !exists {
 		// file doesn't exist locally, downloading it
 		log.Printf("mtgsdk - image of quality %v for card %v doesn't exist locally, downloading it", q, c.ID)
+		if imageURL == "" {
+			log.Printf("mtgsdk - can't download images for card %v", c.ID)
+			return nil
+		}
 		response, err := http.Get(imageURL)
 		if err != nil {
 			return err
