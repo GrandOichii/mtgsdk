@@ -1,54 +1,51 @@
 package mtgsdk
 
-/*
-methods:
-GetCardWithName(string cardName)
-*/
-
 import (
 	"encoding/json"
 	"errors"
-	"fmt"
-	"io"
 	"log"
 	"net"
 	"net/http"
 	"net/url"
 	"os"
-	"path"
 	"strconv"
 	"strings"
 	"sync"
 
 	"github.com/GrandOichii/appdata"
-	"github.com/GrandOichii/box"
-	"github.com/GrandOichii/colorwrapper"
 )
 
 const (
-	imageFileFormat    = "jpg"
-	allCardsFileName   = "all_cards.json"
-	imagesFolder       = "images"
-	apiURL             = "https://api.scryfall.com/"
-	cardIDSearchURL    = apiURL + "/cards/"
-	cardQuerySearchURL = apiURL + "/cards/search?q="
+	imageFileFormat    = "jpg"                       // the format for image files
+	allCardsFileName   = "all_cards.json"            // the path to to the all_cards json file
+	edhrecDataFile     = "edhrec_data.json"          // the path to the file with all the edhrec data for commanders
+	imagesFolder       = "images"                    // the folder for the images
+	apiURL             = "https://api.scryfall.com/" // the url of the api for fetching card data
+	cardIDSearchURL    = apiURL + "/cards/"          // the url for searching for cards
+	cardQuerySearchURL = apiURL + "/cards/search?q=" // the query url
 
-	cardPrintWidth  = 40
-	cardPrintHeight = 25
-	maxCostNum      = 10
+	cardPrintWidth  = 40 // width of the card (for terminal)
+	cardPrintHeight = 25 // height of the card (for terminal)
+	maxCostNum      = 10 // the maximum cost pip
 
-	CardNameKey = "name"
-	SetNameKey  = "set"
+	CardNameKey = "name" // the map key for card name
+	SetNameKey  = "set"  // the map key for set name
+)
 
-	ImageQualitySmall = iota
-	ImageQualityNormal
-	ImageQualityLarge
+type ImageQuality int
+
+const (
+	ImageQualitySmall  ImageQuality = iota // card quality (used in scryfall api)
+	ImageQualityNormal                     // card quality (used in scryfall api)
+	ImageQualityLarge                      // card quality (used in scryfall api)
 )
 
 var (
-	adm appdata.AppDataManager
+	adm          appdata.AppDataManager    // the app data manager
+	allCardsDict map[string]Card           // the map of all cards
+	edhrecData   map[string]map[string]int // the map of all commanders and their reccomendations
 
-	colorMap = map[string]string{
+	colorMap = map[string]string{ // the map of the colors used to print cards
 		"W":    "hiwhite",
 		"U":    "cyan",
 		"B":    "hiblack",
@@ -58,264 +55,6 @@ var (
 		"GOLD": "yellow",
 	}
 )
-
-type Card struct {
-	ID        string `json:"id"`
-	OracleID  string `json:"oracle_id"`
-	Name      string `json:"name"`
-	ImageUris struct {
-		Small  string `json:"small"`
-		Normal string `json:"normal"`
-		Large  string `json:"large"`
-	} `json:"image_uris"`
-	ManaCost        string   `json:"mana_cost"`
-	Cmc             float64  `json:"cmc"`
-	TypeLine        string   `json:"type_line"`
-	OracleText      string   `json:"oracle_text"`
-	Colors          []string `json:"colors"`
-	ColorIdentity   []string `json:"color_identity"`
-	Keywords        []string `json:"keywords"`
-	SetID           string   `json:"set_id"`
-	Set             string   `json:"set"`
-	SetName         string   `json:"set_name"`
-	SetURI          string   `json:"set_uri"`
-	SetSearchURI    string   `json:"set_search_uri"`
-	ScryfallSetURI  string   `json:"scryfall_set_uri"`
-	RulingsURI      string   `json:"rulings_uri"`
-	PrintsSearchURI string   `json:"prints_search_uri"`
-	Rarity          string   `json:"rarity"`
-	CardBackID      string   `json:"card_back_id"`
-	ArtistIds       []string `json:"artist_ids"`
-	IllustrationID  string   `json:"illustration_id"`
-	BorderColor     string   `json:"border_color"`
-	Power           string   `json:"power"`
-	Toughness       string   `json:"toughness"`
-}
-
-type Deck struct {
-	Name    string
-	cards   []Card
-	amounts map[string]int
-}
-
-func (d *Deck) AddCard(card Card, amount int) {
-	if d.amounts == nil {
-		d.amounts = map[string]int{}
-		d.cards = make([]Card, 0)
-	}
-	d.cards = append(d.cards, card)
-	if _, has := d.amounts[card.ID]; !has {
-		d.amounts[card.ID] = 0
-	}
-	d.amounts[card.ID] += amount
-}
-
-func (d Deck) Save(path string) {
-	resultText := ""
-	for i, card := range d.cards {
-		resultText += fmt.Sprint((d.amounts[card.ID])) + " " + card.Name
-		if i != len(d.cards)-1 {
-			resultText += "\n"
-		}
-	}
-	os.WriteFile(path, []byte(resultText), 0755)
-}
-
-func (d Deck) GetUniqueCards() []Card {
-	return d.cards
-}
-
-func (c Card) BasicPrint() {
-	fmt.Printf("Name: %v, ID: %v\n", c.Name, c.ID)
-}
-
-func (c Card) prettyManaCost() (string, int, error) {
-	if c.ManaCost == "" {
-		return "", 0, nil
-	}
-	mchars := strings.Split(c.ManaCost, "}{")
-	mchars[0] = mchars[0][1:]
-	last := mchars[len(mchars)-1]
-	mchars[len(mchars)-1] = last[:len(last)-1]
-	lengthResult := len(strings.Join(mchars, " "))
-	result := ""
-	for i, mchar := range mchars {
-		color, has := colorMap[mchar]
-		if !has {
-			if strings.Contains(mchar, "/") {
-				color = colorMap["GOLD"]
-			} else {
-				color = colorMap["GRAY"]
-			}
-		}
-		colored, err := colorwrapper.GetColored(color, mchar)
-		if err != nil {
-			return "", 0, err
-		}
-		result += colored
-		if i != len(mchars)-1 {
-			result += " "
-		}
-	}
-	return result, lengthResult, nil
-}
-
-func (c Card) prettyTypeLine() (string, error) {
-	return colorwrapper.GetColored("white-normal", c.TypeLine)
-}
-
-func (c Card) prettyPowerToughness() (string, int, error) {
-	coloredP, err := colorwrapper.GetColored("red", c.Power)
-	if err != nil {
-		return "", 0, err
-	}
-	coloredT, err := colorwrapper.GetColored("cyan", c.Toughness)
-	if err != nil {
-		return "", 0, err
-	}
-	coloredSlash, err := colorwrapper.GetColored("white", "/")
-	if err != nil {
-		return "", 0, err
-	}
-	resultLen := len(c.Power + " / " + c.Toughness)
-	result := fmt.Sprintf("%v %v %v", coloredP, coloredSlash, coloredT)
-	return result, resultLen, nil
-}
-
-func (c Card) IsCreature() bool {
-	return strings.Contains(c.TypeLine, "Creature")
-}
-
-func (c Card) prettySplitText() ([]string, error) {
-	result := []string{}
-	for _, line := range strings.Split(c.OracleText, "\n") {
-		for _, sline := range box.StrWidthSplit(line, cardPrintWidth-2) {
-			colored, err := colorwrapper.GetColored("white", sline)
-			if err != nil {
-				return nil, err
-			}
-			result = append(result, colored)
-		}
-	}
-	return result, nil
-}
-
-func (c Card) CardPrint() error {
-	var cardColor string
-	if len(c.Colors) == 0 {
-		// nameColor = nil
-		cardColor = colorMap["GRAY"]
-	} else if len(c.Colors) > 1 {
-		cardColor = colorMap["GOLD"]
-	} else {
-		cardColor = colorMap[c.Colors[0]]
-	}
-	nameString, err := colorwrapper.GetColored(cardColor+"-normal-bold", c.Name)
-	if err != nil {
-		return err
-	}
-	coloredManaCost, mclength, err := c.prettyManaCost()
-	if err != nil {
-		return err
-	}
-	topMiddleSpace := strings.Repeat(" ", cardPrintWidth-len(c.Name)-mclength-2)
-	topString := nameString + topMiddleSpace + coloredManaCost
-	prettyType, err := c.prettyTypeLine()
-	if err != nil {
-		return err
-	}
-	lines := []string{
-		topString,
-		box.Separator(cardColor),
-		prettyType,
-		box.Separator(cardColor),
-	}
-	// adding text
-	textLines, err := c.prettySplitText()
-	if err != nil {
-		return err
-	}
-	lines = append(lines, textLines...)
-	// add the bottom (for creatures)
-	if c.IsCreature() {
-		// add blank spaces
-		whiteSpaces := cardPrintHeight - len(lines) - 4
-		for i := 0; i < whiteSpaces; i++ {
-			lines = append(lines, "")
-		}
-		// add bottom separator
-		lines = append(lines, box.Separator(cardColor))
-		// add bottom line
-		pt, ptlen, err := c.prettyPowerToughness()
-		if err != nil {
-			return err
-		}
-		line := strings.Repeat(" ", cardPrintWidth-ptlen-2) + pt
-		lines = append(lines, line)
-	}
-	// fmt.Println(lines)
-	return box.Draw(cardPrintHeight, cardPrintWidth, lines, cardColor)
-}
-
-func (c Card) DownloadImage(outPath string, quality int) error {
-	// get request
-	imageURL := ""
-	q := ""
-	switch quality {
-	case ImageQualitySmall:
-		imageURL = c.ImageUris.Small
-		q = "small"
-	case ImageQualityNormal:
-		imageURL = c.ImageUris.Normal
-		q = "normal"
-	case ImageQualityLarge:
-		imageURL = c.ImageUris.Large
-		q = "large"
-	}
-	fileName := fmt.Sprintf("%v_%v.%v", c.ID, q, imageFileFormat)
-	appdataPath := path.Join(imagesFolder, fileName)
-	resultPath := path.Join(outPath, fileName)
-	// check whether image already exists
-	exists, err := adm.FileExists(appdataPath)
-	if err != nil {
-		return err
-	}
-	if !exists {
-		// file doesn't exist locally, downloading it
-		log.Printf("mtgsdk - image of quality %v for card %v doesn't exist locally, downloading it", q, c.ID)
-		if imageURL == "" {
-			log.Printf("mtgsdk - can't download images for card %v", c.ID)
-			return nil
-		}
-		response, err := http.Get(imageURL)
-		if err != nil {
-			return err
-		}
-		defer response.Body.Close()
-		// check status code
-		if response.StatusCode != 200 {
-			return fmt.Errorf("received a non 200 response when downloading from %v", imageURL)
-		}
-		// create output file
-		file, err := os.Create(adm.ConcatPath(appdataPath))
-		if err != nil {
-			return err
-		}
-		defer file.Close()
-		// copy the data to the file
-		_, err = io.Copy(file, response.Body)
-		if err != nil {
-			return err
-		}
-	}
-	contents, err := adm.ReadFile(appdataPath)
-	if err != nil {
-		return err
-	}
-	os.WriteFile(resultPath, contents, 0755)
-	log.Printf("mtgsdk - saved image for %v", c.ID)
-	return nil
-}
 
 func init() {
 	log.Print("mtgsdk - initializing package")
@@ -329,44 +68,78 @@ func init() {
 	if err != nil {
 		panic(err)
 	}
+	// create the edhrec data file
+	err = createEDHRECDataFile()
+	if err != nil {
+		panic(err)
+	}
 	// create imagesFolder folder
 	err = createCardImagesFolder()
 	if err != nil {
 		panic(err)
 	}
-}
-
-func (c Card) Matches(params map[string]string) bool {
-	for key, value := range params {
-		switch key {
-		case CardNameKey:
-			if !strings.Contains(c.Name, value) {
-				return false
-			}
-		case SetNameKey:
-			if !strings.Contains(c.SetName, value) {
-				return false
-			}
-		}
+	// load all cards
+	err = loadAllCards()
+	if err != nil {
+		panic(err)
 	}
-	return true
+	log.Print("mtgsdk - all cards loaded!")
+	// load edhrec data
+	err = loadEDHRECData()
+	if err != nil {
+		panic(err)
+	}
+	log.Print("mtgsdk - edhrec data loaded")
 }
 
-func getLocalCardDict() (map[string]Card, error) {
-	// possibly save this to ram?
+// Loads all the cards from the all_cards json file
+func loadAllCards() error {
+	// read the data
 	existingData, err := adm.ReadFile(allCardsFileName)
 	if err != nil {
-		return nil, err
+		return err
 	}
-	// var cards []Card
-	var cards map[string]Card
-	err = json.Unmarshal(existingData, &cards)
+	// parse the data
+	err = json.Unmarshal(existingData, &allCardsDict)
 	if err != nil {
-		return nil, err
+		return err
 	}
-	return cards, nil
+	return nil
 }
 
+// Loads the edhrec data
+func loadEDHRECData() error {
+	existsingData, err := adm.ReadFile(edhrecDataFile)
+	if err != nil {
+		return err
+	}
+	// parse the data
+	err = json.Unmarshal(existsingData, &edhrecData)
+	if err != nil {
+		return err
+	}
+	return nil
+}
+
+// Saves the local cards into the all_cards json file
+func saveLocalCardDict() error {
+	data, err := json.MarshalIndent(allCardsDict, "", "\t")
+	if err != nil {
+		return err
+	}
+	return adm.WriteToFile(allCardsFileName, data)
+}
+
+// Saves the edhrec data locally
+func saveEDHRECData() error {
+	data, err := json.MarshalIndent(edhrecData, "", "\t")
+	if err != nil {
+		return err
+	}
+	return adm.WriteToFile(edhrecDataFile, data)
+}
+
+// Creates the all_cards json file
 func createAllCardsFile() error {
 	exists, err := adm.FileExists(allCardsFileName)
 	if err != nil {
@@ -381,6 +154,22 @@ func createAllCardsFile() error {
 	return nil
 }
 
+// Create the edhrec data json file
+func createEDHRECDataFile() error {
+	exists, err := adm.FileExists(edhrecDataFile)
+	if err != nil {
+		return err
+	}
+	if !exists {
+		err = adm.WriteToFile(edhrecDataFile, []byte("{}"))
+		if err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// Creates the card images folder
 func createCardImagesFolder() error {
 	exists, err := adm.FileExists(imagesFolder)
 	if err != nil {
@@ -395,6 +184,9 @@ func createCardImagesFolder() error {
 	return nil
 }
 
+// Saves card to allCards
+//
+// First checks whether card is already in dict. If true, doesn't do anything. If false, adds the card to the dict and saves the dict to allCardsPath
 func saveCard(card Card) error {
 	// if card has no id, don't do anything
 	if card.ID == "" {
@@ -402,29 +194,25 @@ func saveCard(card Card) error {
 		return nil
 	}
 	// add card to dict
-	cards, err := getLocalCardDict()
-	if err != nil {
-		return err
-	}
 	// if key is already in dictionary
-	if _, hasid := cards[card.ID]; hasid {
+	if _, hasid := allCardsDict[card.ID]; hasid {
 		return nil
 	}
-	cards[card.ID] = card
+	allCardsDict[card.ID] = card
 	// save dict to file
-	data, err := json.MarshalIndent(cards, "", "\t")
+	err := saveLocalCardDict()
 	if err != nil {
 		return err
 	}
 	log.Printf("mtgsdk - added card %v to all cards file", card.ID)
-	return adm.WriteToFile(allCardsFileName, data)
+	return nil
 }
 
+// Parses params to query escaped string
 func paramsToQ(params map[string]string) string {
 	result := ""
 	for key, value := range params {
 		if value != "" {
-
 			result += url.QueryEscape(key+"="+value) + "+"
 		}
 	}
@@ -432,6 +220,7 @@ func paramsToQ(params map[string]string) string {
 	return result
 }
 
+// Fetches the cards from the scryfall api
 func FetchCards(params map[string]string) ([]Card, error) {
 	log.Printf("mtgsdk - fetching cards with params %v", params)
 	parsed := paramsToQ(params)
@@ -466,26 +255,24 @@ func FetchCards(params map[string]string) ([]Card, error) {
 	return cardc.Cards, nil
 }
 
-func getCardsOffline(params map[string]string) ([]Card, error) {
-	cardDict, err := getLocalCardDict()
-	if err != nil {
-		return nil, err
-	}
-	cards := make([]Card, 0, len(cardDict))
-	for _, card := range cardDict {
+// Returns the cards stored in the all_cards json file
+func GetCardsOffline(params map[string]string) ([]Card, error) {
+	cards := make([]Card, 0, len(allCardsDict))
+	for _, card := range allCardsDict {
 		cards = append(cards, card)
 	}
 	result := applyQ(cards, params)
 	return result, nil
 }
 
+// Searches the cards online, if fails, searches for them locally
 func GetCards(params map[string]string) ([]Card, error) {
 	// TODO
 	cards, err := FetchCards(params)
 	var dnsError *net.DNSError
 	if errors.As(err, &dnsError) {
 		log.Println("mtgsdk - failed to connect to host, looking up cards in allCardsPath")
-		return getCardsOffline(params)
+		return GetCardsOffline(params)
 	}
 	// some other kind of error
 	if err != nil {
@@ -494,6 +281,7 @@ func GetCards(params map[string]string) ([]Card, error) {
 	return cards, nil
 }
 
+// Returns a slice of all cards that specify the params
 func applyQ(cards []Card, params map[string]string) []Card {
 	result := make([]Card, 0, len(cards))
 	for _, card := range cards {
@@ -504,7 +292,10 @@ func applyQ(cards []Card, params map[string]string) []Card {
 	return result
 }
 
-func DownloadCardImages(params map[string]string, deckPath string, outPath string, quality int) error {
+// Downloads the card images that match the params
+//
+// If deckPath is not empty, selects the cards from the deckPath
+func DownloadCardImages(params map[string]string, deckPath string, outPath string, quality ImageQuality) error {
 	var cards []Card
 	var err error
 	if deckPath == "" {
@@ -537,6 +328,7 @@ func DownloadCardImages(params map[string]string, deckPath string, outPath strin
 	return nil
 }
 
+// Fetches for the card with the specified id online
 func fetchCardWithID(id string) (Card, error) {
 	url := cardIDSearchURL + id
 	resp, err := http.Get(url)
@@ -550,15 +342,14 @@ func fetchCardWithID(id string) (Card, error) {
 	if err != nil {
 		return Card{}, err
 	}
+	// save card
+	saveCard(card)
 	return card, nil
 }
 
+// Checks if the id is in the allCardsDict, if not, searches for it online
 func GetCard(id string) (Card, error) {
-	cards, err := getLocalCardDict()
-	if err != nil {
-		return Card{}, nil
-	}
-	if card, found := cards[id]; found {
+	if card, found := allCardsDict[id]; found {
 		return card, nil
 	}
 	// failed to fetch locally, going online
@@ -569,6 +360,7 @@ func GetCard(id string) (Card, error) {
 	return card, nil
 }
 
+// Reads the deck from the specified path
 func ReadDeck(path string) (Deck, error) {
 	contents, err := os.ReadFile(path)
 	if err != nil {
