@@ -152,7 +152,11 @@ func (c Card) CardPrint() error {
 	if err != nil {
 		return err
 	}
-	topMiddleSpace := strings.Repeat(" ", cardPrintWidth-len(c.Name)-mclength-2)
+	tmsr := cardPrintWidth - len(c.Name) - mclength - 2
+	if tmsr < 0 {
+		tmsr = 0
+	}
+	topMiddleSpace := strings.Repeat(" ", tmsr)
 	topString := nameString + topMiddleSpace + coloredManaCost
 	prettyType, err := c.prettyTypeLine()
 	if err != nil {
@@ -270,9 +274,19 @@ func (c Card) Matches(params map[string]string) bool {
 }
 
 // Returns the map of card ids and their synergies (only applies to legendary creatures)
-func (c Card) GetReccomendations(synergy int) (map[string]int, error) {
+func (c Card) GetReccomendations(synergy int) (map[*Card]int, error) {
 	if c.IsLegendary() && c.IsCreature() {
-		return reccomendCards(c.Name, synergy)
+		recc, err := reccomendCards(c.Name)
+		if err != nil {
+			return nil, err
+		}
+		result := make(map[*Card]int)
+		for card, syn := range recc {
+			if syn >= synergy {
+				result[card] = syn
+			}
+		}
+		return result, nil
 	} else {
 		return nil, fmt.Errorf("mtgsdk - can't get reccomendations for non-legendary creature (%s)", c.Name)
 	}

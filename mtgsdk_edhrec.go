@@ -3,7 +3,6 @@ package mtgsdk
 import (
 	"fmt"
 	"log"
-	"os"
 	"strconv"
 	"strings"
 
@@ -66,11 +65,6 @@ func nav(url string) (*rod.Page, error) {
 	log.Println("Connected to the page, rendering...")
 	waitFunc()
 	log.Println("Page rendered!")
-	html := page.MustHTML()
-	err = os.WriteFile("page.html", []byte(html), 0755)
-	if err != nil {
-		return nil, err
-	}
 	return page, nil
 }
 
@@ -81,14 +75,26 @@ func extractNameAndSynergy(text string) (string, int, error) {
 	return lines[3], s, err
 }
 
+func toCardMap(data map[string]int) (map[*Card]int, error) {
+	result := make(map[*Card]int, len(data))
+	for id, syn := range data {
+		card, err := GetCard(id)
+		if err != nil {
+			return nil, err
+		}
+		result[&card] = syn
+	}
+	return result, nil
+}
+
 // Returns the map of cards id to synergy
-func reccomendCards(name string, synergyThresh int) (map[string]int, error) {
+func reccomendCards(name string) (map[*Card]int, error) {
 	log.Printf("Searching the best cards for %s", name)
 	var err error
 	// check if the data exists locally
 	data, has := edhrecData[name]
 	if has {
-		return data, nil
+		return toCardMap(data)
 	}
 	// data doesn't exist locally, fetching for it online
 	// init the browser
@@ -131,12 +137,19 @@ func reccomendCards(name string, synergyThresh int) (map[string]int, error) {
 		if err != nil {
 			return nil, err
 		}
-		if synergy > synergyThresh {
-			result[name] = synergy
+		cards, err := GetCards(map[string]string{CardNameKey: name})
+		if err != nil {
+			return nil, err
 		}
+		card := cards[0]
+		result[card.ID] = synergy
 	}
 	log.Printf("Card stats for %s loaded!", name)
 	// save locally
 	edhrecData[name] = result
-	return result, saveEDHRECData()
+	err = saveEDHRECData()
+	if err != nil {
+		return nil, err
+	}
+	return toCardMap(result)
 }
