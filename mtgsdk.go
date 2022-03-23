@@ -57,7 +57,6 @@ var (
 )
 
 func init() {
-	log.Print("mtgsdk - initializing package")
 	var err error
 	adm, err = appdata.CreateAppDataManager("mtgsdk-data")
 	if err != nil {
@@ -83,13 +82,11 @@ func init() {
 	if err != nil {
 		panic(err)
 	}
-	log.Print("mtgsdk - all cards loaded!")
 	// load edhrec data
 	err = loadEDHRECData()
 	if err != nil {
 		panic(err)
 	}
-	log.Print("mtgsdk - edhrec data loaded")
 }
 
 // Loads all the cards from the all_cards json file
