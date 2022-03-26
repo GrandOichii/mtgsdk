@@ -7,9 +7,6 @@ import (
 	"net"
 	"net/http"
 	"net/url"
-	"os"
-	"strconv"
-	"strings"
 	"sync"
 
 	"github.com/GrandOichii/appdata"
@@ -19,6 +16,7 @@ const (
 	imageFileFormat    = "jpg"                       // the format for image files
 	allCardsFileName   = "all_cards.json"            // the path to to the all_cards json file
 	edhrecDataFile     = "edhrec_data.json"          // the path to the file with all the edhrec data for commanders
+	edhrecStaplesFile  = "edhrec_staples.json"       // The path to the file with all the ids of staple cards for commander
 	imagesFolder       = "images"                    // the folder for the images
 	apiURL             = "https://api.scryfall.com/" // the url of the api for fetching card data
 	cardIDSearchURL    = apiURL + "/cards/"          // the url for searching for cards
@@ -43,7 +41,7 @@ const (
 var (
 	adm          appdata.AppDataManager    // the app data manager
 	allCardsDict map[string]Card           // the map of all cards
-	edhrecData   map[string]map[string]int // the map of all commanders and their reccomendations
+	edhrecData   map[string]map[string]int // the map of all commanders and their reccomendations (card.id -- synergy)
 
 	colorMap = map[string]string{ // the map of the colors used to print cards
 		"W":    "hiwhite",
@@ -68,7 +66,7 @@ func init() {
 		panic(err)
 	}
 	// create the edhrec data file
-	err = createEDHRECDataFile()
+	err = createEDHRECFiles()
 	if err != nil {
 		panic(err)
 	}
@@ -152,13 +150,23 @@ func createAllCardsFile() error {
 }
 
 // Create the edhrec data json file
-func createEDHRECDataFile() error {
+func createEDHRECFiles() error {
 	exists, err := adm.FileExists(edhrecDataFile)
 	if err != nil {
 		return err
 	}
 	if !exists {
 		err = adm.WriteToFile(edhrecDataFile, []byte("{}"))
+		if err != nil {
+			return err
+		}
+	}
+	exists, err = adm.FileExists(edhrecStaplesFile)
+	if err != nil {
+		return err
+	}
+	if !exists {
+		err = adm.WriteToFile(edhrecStaplesFile, []byte("[]"))
 		if err != nil {
 			return err
 		}
@@ -263,8 +271,10 @@ func GetCardsOffline(params map[string]string) ([]Card, error) {
 }
 
 // Searches the cards online, if fails, searches for them locally
-func GetCards(params map[string]string) ([]Card, error) {
-	// TODO
+func GetCards(params map[string]string, offline bool) ([]Card, error) {
+	if offline {
+		return GetCardsOffline(params)
+	}
 	cards, err := FetchCards(params)
 	var dnsError *net.DNSError
 	if errors.As(err, &dnsError) {
@@ -292,11 +302,11 @@ func applyQ(cards []Card, params map[string]string) []Card {
 // Downloads the card images that match the params
 //
 // If deckPath is not empty, selects the cards from the deckPath
-func DownloadCardImages(params map[string]string, deckPath string, outPath string, quality ImageQuality) error {
+func DownloadCardImages(params map[string]string, deckPath string, outPath string, quality ImageQuality, offline bool) error {
 	var cards []Card
 	var err error
 	if deckPath == "" {
-		cards, err = GetCards(params)
+		cards, err = GetCards(params, offline)
 	} else {
 		deck, err := ReadDeck(deckPath)
 		deckCards := deck.GetUniqueCards()
@@ -357,28 +367,16 @@ func GetCard(id string) (Card, error) {
 	return card, nil
 }
 
-// Reads the deck from the specified path
-func ReadDeck(path string) (Deck, error) {
-	contents, err := os.ReadFile(path)
-	if err != nil {
-		return Deck{}, err
-	}
-	text := string(contents)
-	lines := strings.Split(text, "\n")
-	result := Deck{}
-	for _, line := range lines {
-		words := strings.Split(line, " ")
-		amount := words[0]
-		cardName := strings.Join(words[1:], " ")
-		fcards, err := GetCards(map[string]string{CardNameKey: cardName})
+// Returns the map of basic lands
+func GetBasicLands(offline bool) (map[string]Card, error) {
+	blnames := []string{"Plains", "Island", "Swamp", "Mountain", "Forest"}
+	result := map[string]Card{}
+	for _, blname := range blnames {
+		cards, err := GetCards(map[string]string{CardNameKey: blname}, offline)
 		if err != nil {
-			return Deck{}, err
+			return nil, err
 		}
-		a, err := strconv.Atoi(amount)
-		if err != nil {
-			return Deck{}, err
-		}
-		result.AddCard(fcards[0], a)
+		result[blname] = cards[0]
 	}
 	return result, nil
 }

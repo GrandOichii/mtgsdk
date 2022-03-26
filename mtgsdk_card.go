@@ -108,16 +108,6 @@ func (c Card) prettyPowerToughness() (string, int, error) {
 	return result, resultLen, nil
 }
 
-// Returns true if the card is a creature
-func (c Card) IsCreature() bool {
-	return strings.Contains(c.TypeLine, "Creature")
-}
-
-// Returns true if the card is legendary
-func (c Card) IsLegendary() bool {
-	return strings.Contains(c.TypeLine, "Legendary")
-}
-
 // Returns the prettified split text of the card
 func (c Card) prettySplitText() ([]string, error) {
 	result := []string{}
@@ -191,7 +181,6 @@ func (c Card) CardPrint() error {
 		line := strings.Repeat(" ", cardPrintWidth-ptlen-2) + pt
 		lines = append(lines, line)
 	}
-	// fmt.Println(lines)
 	return box.Draw(cardPrintHeight, cardPrintWidth, lines, cardColor)
 }
 
@@ -274,9 +263,9 @@ func (c Card) Matches(params map[string]string) bool {
 }
 
 // Returns the map of card ids and their synergies (only applies to legendary creatures)
-func (c Card) GetReccomendations(synergy int) (map[*Card]int, error) {
+func (c Card) GetReccomendations(synergy int, offline bool) (map[*Card]int, error) {
 	if c.IsLegendary() && c.IsCreature() {
-		recc, err := reccomendCards(c.Name)
+		recc, err := reccomendCards(c.ID, offline)
 		if err != nil {
 			return nil, err
 		}
@@ -290,4 +279,76 @@ func (c Card) GetReccomendations(synergy int) (map[*Card]int, error) {
 	} else {
 		return nil, fmt.Errorf("mtgsdk - can't get reccomendations for non-legendary creature (%s)", c.Name)
 	}
+}
+
+// Returns true if the card is a creature
+func (c Card) IsCreature() bool {
+	return strings.Contains(c.TypeLine, "Creature")
+}
+
+// Returns true if the card is legendary
+func (c Card) IsLegendary() bool {
+	return strings.Contains(c.TypeLine, "Legendary")
+}
+
+// Returns true if the card is a land
+func (c Card) IsLand() bool {
+	return strings.Contains(c.TypeLine, "Land")
+}
+
+// Returns true if the card is a basic land
+func (c Card) IsBasicLand() bool {
+	return strings.Contains(c.TypeLine, "Basic Land")
+}
+
+// Returns true if the card can generate mana
+func (c Card) IsRamp() bool {
+	return !c.IsLand() && strings.Contains(c.OracleText, "Add ") || strings.Contains(c.OracleText, "your library for a basic land card, put that card onto the battlefield tapped")
+}
+
+// Returns true if the card is a board wipe
+func (c Card) IsBoardWipe() bool {
+	return strings.Contains(c.OracleText, "Destroy all ") || strings.Contains(c.OracleText, " damage to each creature") || strings.Contains(c.OracleText, "All creatures get -")
+}
+
+// Returns true if the card forces the player to draw cards
+func (c Card) IsCardDraw() bool {
+	return strings.Contains(strings.ToLower(c.OracleText), "draw ")
+}
+
+// Returns true if the card is a removal card
+func (c Card) IsRemoval() bool {
+	return strings.Contains(strings.ToLower(c.OracleText), "destroy target")
+}
+
+// Returns true if the colors match the color identity of the card
+func (c Card) MatchesColorIdentity(colors []string) bool {
+	for _, ci := range colors {
+		contains := false
+		for _, cci := range c.ColorIdentity {
+			if ci == cci {
+				contains = true
+				break
+			}
+		}
+		if !contains {
+			return false
+		}
+	}
+	return true
+}
+
+// Returns the map of counted color pips
+func (c Card) CountColorPips() map[string]int {
+	cpips := strings.Split("WUBRG", "")
+	result := map[string]int{}
+	for _, pip := range cpips {
+		amount := strings.Count(c.ManaCost, pip)
+		_, has := result[pip]
+		if !has {
+			result[pip] = 0
+		}
+		result[pip] += amount
+	}
+	return result
 }
