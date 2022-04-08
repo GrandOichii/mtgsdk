@@ -3,7 +3,6 @@ package mtgsdk
 import (
 	"fmt"
 	"io"
-	"log"
 	"net/http"
 	"os"
 	"path"
@@ -210,9 +209,9 @@ func (c Card) DownloadImage(outPath string, quality ImageQuality) error {
 	}
 	if !exists {
 		// file doesn't exist locally, downloading it
-		log.Printf("mtgsdk - image of quality %v for card %v doesn't exist locally, downloading it", q, c.ID)
+		logger.Printf("mtgsdk - image of quality %v for card %v doesn't exist locally, downloading it", q, c.ID)
 		if imageURL == "" {
-			log.Printf("mtgsdk - can't download images for card %v", c.ID)
+			logger.Printf("mtgsdk - can't download images for card %v", c.ID)
 			return nil
 		}
 		response, err := http.Get(imageURL)
@@ -225,7 +224,7 @@ func (c Card) DownloadImage(outPath string, quality ImageQuality) error {
 			return fmt.Errorf("received a non 200 response when downloading from %v", imageURL)
 		}
 		// create output file
-		file, err := os.Create(adm.ConcatPath(appdataPath))
+		file, err := os.Create(adm.PathTo(appdataPath))
 		if err != nil {
 			return err
 		}
@@ -241,7 +240,7 @@ func (c Card) DownloadImage(outPath string, quality ImageQuality) error {
 		return err
 	}
 	os.WriteFile(resultPath, contents, 0755)
-	log.Printf("mtgsdk - saved image for %v", c.ID)
+	logger.Printf("mtgsdk - saved image for %v", c.ID)
 	return nil
 }
 
@@ -263,9 +262,9 @@ func (c Card) Matches(params map[string]string) bool {
 }
 
 // Returns the map of card ids and their synergies (only applies to legendary creatures)
-func (c Card) GetReccomendations(synergy int, offline bool) (map[*Card]int, error) {
+func (c Card) GetRecommendations(synergy int, offline bool) (map[*Card]int, error) {
 	if c.IsLegendary() && c.IsCreature() {
-		recc, err := reccomendCards(c.ID, offline)
+		recc, err := recommendCards(c.ID, offline)
 		if err != nil {
 			return nil, err
 		}
@@ -277,7 +276,7 @@ func (c Card) GetReccomendations(synergy int, offline bool) (map[*Card]int, erro
 		}
 		return result, nil
 	} else {
-		return nil, fmt.Errorf("mtgsdk - can't get reccomendations for non-legendary creature (%s)", c.Name)
+		return nil, fmt.Errorf("mtgsdk - can't get recommendations for non-legendary creature (%s)", c.Name)
 	}
 }
 
@@ -352,3 +351,27 @@ func (c Card) CountColorPips() map[string]int {
 	}
 	return result
 }
+
+// Returns true if the card has the specified name
+//
+// Works on double-faced cards
+func (c Card) HasName(name string) bool {
+	if c.Name == name {
+		return true
+	}
+	// weird cards that are the same on two sides
+	names := strings.Split(c.Name, " // ")
+	if len(names) == 2 && names[0] == names[1] {
+		return false
+	}
+	for _, fname := range names {
+		if fname == name {
+			return true
+		}
+	}
+	return false
+}
+
+// func (c Card) GetRusPrice() (int, error) {
+// 	return getRusPriceFor(c.Name)
+// }

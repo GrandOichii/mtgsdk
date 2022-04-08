@@ -2,7 +2,6 @@ package mtgsdk
 
 import (
 	"fmt"
-	"log"
 	"sort"
 )
 
@@ -21,28 +20,29 @@ const (
 )
 
 // Generates a commander deck for a card (the card has to be a legendary creature)
-func (c Card) GenerateCommanderDeck(params map[string]interface{}, offline bool) (*Deck, error) {
+func (c Card) GenerateCommanderDeck(params map[string]int) (*Deck, error) {
 	if !(c.IsCreature() && c.IsLegendary()) {
 		return nil, fmt.Errorf("mtgsdk - %s is not a legendary creature", c.Name)
 	}
-	log.Printf("Generating deck for %s", c.Name)
+	logger.Printf("generating deck for %s", c.Name)
 	result := CreateDeck(fmt.Sprintf("Commander deck for %s", c.Name))
 	// add the commander itself
 	result.AddSingletonCard(&c)
 	// add staples
-	staples, err := GetEDHRECStaples(offline)
+	staples, err := GetEDHRECStaples()
 	if err != nil {
 		return nil, err
 	}
-	unsortedRecc, err := reccomendCards(c.ID, offline)
+	unsortedRecc, err := recommendCards(c.ID, false)
 	if err != nil {
-		return nil, err
+		logger.Println("failed to fetch recommendations online, trying locally...")
+		// unsortedRecc, err := reco
 	}
 	recc := sortRecc(unsortedRecc)
 	// add lands
 	lr := LandCountDefault
 	if amount, has := params[DeckGenLandCount]; has {
-		lr = amount.(int)
+		lr = amount
 	}
 	rcards := 99 - lr
 	for _, pair := range *recc {
@@ -53,7 +53,7 @@ func (c Card) GenerateCommanderDeck(params map[string]interface{}, offline bool)
 		if card.IsLand() {
 			if result.AddSingletonCard(card) {
 				lr--
-				log.Printf("mtgsdk - adding %s -- land (%d)", card.Name, lr)
+				logger.Printf("mtgsdk - adding %s -- land (%d)", card.Name, lr)
 			}
 		}
 	}
@@ -65,53 +65,53 @@ func (c Card) GenerateCommanderDeck(params map[string]interface{}, offline bool)
 			if card.IsLand() {
 				if result.AddSingletonCard(&card) {
 					lr--
-					log.Printf("mtgsdk - Adding %s -- land", card.Name)
+					logger.Printf("mtgsdk - Adding %s -- land", card.Name)
 				}
 			}
 		}
 	}
-	log.Print("mtgsdk - added lands")
+	logger.Print("mtgsdk - added lands")
 	if rcards <= 0 {
 		return result, nil
 	}
 	// add other staples
 	rampr := RampCountDefault
 	if amount, has := params[DeckGenRampCountKey]; has {
-		rampr = amount.(int)
+		rampr = amount
 	}
 	bwr := BoardWipeCountDefault
 	if amount, has := params[DeckGenBoardWipeCountKey]; has {
-		bwr = amount.(int)
+		bwr = amount
 	}
 	cdr := CardDrawCountDefault
 	if amount, has := params[DeckGenCardDrawCount]; has {
-		cdr = amount.(int)
+		cdr = amount
 	}
 	rr := RemovalCountDefault
 	if amount, has := params[DeckGenRemovalCount]; has {
-		rr = amount.(int)
+		rr = amount
 	}
 	for _, card := range staples {
 		if rcards != 0 && c.MatchesColorIdentity(card.ColorIdentity) {
 			add := false
 			if rampr != 0 && card.IsRamp() {
 				rampr--
-				log.Printf("mtgsdk - adding %s -- ramp", card.Name)
+				logger.Printf("mtgsdk - adding %s -- ramp", card.Name)
 				add = true
 			}
 			if bwr != 0 && card.IsBoardWipe() {
 				bwr--
-				log.Printf("mtgsdk - adding %s -- board wipe", card.Name)
+				logger.Printf("mtgsdk - adding %s -- board wipe", card.Name)
 				add = true
 			}
 			if cdr != 0 && card.IsCardDraw() {
 				cdr--
-				log.Printf("mtgsdk - adding %s -- card draw", card.Name)
+				logger.Printf("mtgsdk - adding %s -- card draw", card.Name)
 				add = true
 			}
 			if rr != 0 && card.IsRemoval() {
 				rr--
-				log.Printf("mtgsdk - adding %s -- removal", card.Name)
+				logger.Printf("mtgsdk - adding %s -- removal", card.Name)
 				add = true
 			}
 			if add {
@@ -121,7 +121,7 @@ func (c Card) GenerateCommanderDeck(params map[string]interface{}, offline bool)
 			}
 		}
 	}
-	// add reccomendations
+	// add recommendations
 	for _, pair := range *recc {
 		if rcards == 0 {
 			break
@@ -129,24 +129,26 @@ func (c Card) GenerateCommanderDeck(params map[string]interface{}, offline bool)
 		card := pair.Key
 		if result.AddSingletonCard(card) {
 			rcards--
-			log.Printf("mtgsdk - added card %s as reccomendation (synergy: %d)\n", card.Name, pair.Value)
+			logger.Printf("added card %s as recommendation (synergy: %d)\n", card.Name, pair.Value)
 		}
 	}
 	// add remaining basic lands
-	blrecc, err := result.ReccomendBasicLands(lr)
+	blrecc, err := result.RecommendBasicLands(lr)
+	if err != nil {
+		return nil, err
+	}
+	basics, err := GetBasicLands()
 	if err != nil {
 		return nil, err
 	}
 	for lname, amount := range blrecc {
-		cards, err := GetCards(map[string]string{CardNameKey: lname}, offline)
-		if err != nil {
-			return nil, err
+		card, has := basics[lname]
+		if !has {
+			return nil, fmt.Errorf("mtgsdk - no basic land with name %s", lname)
 		}
-		for _, card := range cards {
-			if amount != 0 && card.Name == lname {
-				result.AddCard(&card, amount)
-				break
-			}
+		if amount != 0 && card.HasName(lname) {
+			result.AddCard(&card, amount)
+			break
 		}
 	}
 	return result, nil

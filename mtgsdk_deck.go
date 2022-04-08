@@ -1,6 +1,7 @@
 package mtgsdk
 
 import (
+	"encoding/json"
 	"fmt"
 	"os"
 	"strconv"
@@ -70,7 +71,7 @@ func ReadDeck(path string) (Deck, error) {
 		words := strings.Split(line, " ")
 		amount := words[0]
 		cardName := strings.Join(words[1:], " ")
-		fcards, err := GetCards(map[string]string{CardNameKey: cardName}, false)
+		card, err := GetCardWithExactName(cardName)
 		if err != nil {
 			return Deck{}, err
 		}
@@ -78,7 +79,7 @@ func ReadDeck(path string) (Deck, error) {
 		if err != nil {
 			return Deck{}, err
 		}
-		result.AddCard(&fcards[0], a)
+		result.AddCard(&card, a)
 	}
 	return result, nil
 }
@@ -137,13 +138,11 @@ func (d Deck) Count(cardID string) int {
 // Prints the deck out to the console
 func (d Deck) Print() error {
 	fmt.Printf("Deck %s\n", d.Name)
-	for _, card := range d.cards {
-		amount, has := d.amounts[card.ID]
-		if !has {
-			return fmt.Errorf("mtgsdk - deck.amounts doesn't contain card %s", card.Name)
-		}
-		fmt.Printf("%d %s\n", amount, card.Name)
+	s, err := d.ToString()
+	if err != nil {
+		return err
 	}
+	fmt.Println(s)
 	return nil
 }
 
@@ -196,10 +195,10 @@ func (d Deck) GetStats() (*DeckStat, error) {
 	return &result, nil
 }
 
-// Reccomends basic lands for the deck
+// Recommends basic lands for the deck
 //
 // Returns a map of basic land name: amount
-func (d Deck) ReccomendBasicLands(count int) (map[string]int, error) {
+func (d Deck) RecommendBasicLands(count int) (map[string]int, error) {
 	landMap := map[string]string{
 		"W": "Plains",
 		"U": "Island",
@@ -274,4 +273,22 @@ func (d Deck) ReccomendBasicLands(count int) (map[string]int, error) {
 		result[key] += i
 	}
 	return result, nil
+}
+
+// Converts the deck to the standard representation of an mtg deck
+func (d Deck) ToString() (string, error) {
+	result := ""
+	for _, card := range d.cards {
+		amount, has := d.amounts[card.ID]
+		if !has {
+			return "", fmt.Errorf("mtgsdk - deck.amounts doesn't contain card %s", card.Name)
+		}
+		result += fmt.Sprintf("%d %s\n", amount, card.Name)
+	}
+	return result, nil
+}
+
+// Converts the deck to a json format
+func (d Deck) ToJSON() ([]byte, error) {
+	return json.MarshalIndent(d.amounts, "", "\t")
 }

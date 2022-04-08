@@ -4,13 +4,10 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"log"
 	"strconv"
 	"strings"
 
 	"github.com/go-rod/rod"
-	"github.com/go-rod/rod/lib/launcher"
-	"github.com/go-rod/rod/lib/proto"
 )
 
 const (
@@ -18,58 +15,27 @@ const (
 	staplesURL         = "https://edhrec.com/top"           // The url for searching for staples
 
 	cardSelector = "div[class^=\"Card_container__\"]" // The selector for card elements
+
+	renderLimit = 6
 )
 
 var (
-	browser *rod.Browser = nil // The browser that accesses the edhrec website
-
 	// Disallowed characters in the card name URL
 	dchars = []string{
 		",",
+		"'",
 	}
 )
 
 // Turns the card name to a valid udhrec url
 func commanderURL(cardName string) string {
-	cname := strings.ToLower(cardName)
+	names := strings.Split(cardName, " // ")
+	cname := strings.ToLower(names[0])
 	for _, dchar := range dchars {
 		cname = strings.ReplaceAll(cname, dchar, "")
 	}
 	cname = strings.ReplaceAll(cname, " ", "-")
 	return fmt.Sprintf(commanderSearchURL, cname)
-}
-
-// Initializes the browser
-func initBrowser() error {
-	u := launcher.New().
-		// Headless(false).
-		Set("--blink-settings=imagesEnabled=false").
-		MustLaunch()
-
-	browser = rod.New().ControlURL(u)
-	err := browser.Connect()
-	if err != nil {
-		return err
-	}
-	log.Println("Connected to browser")
-	return nil
-}
-
-// Navigates the browser to the specified url
-func nav(url string) (*rod.Page, error) {
-	page, err := browser.Page(proto.TargetCreateTarget{})
-	if err != nil {
-		return nil, err
-	}
-	waitFunc := page.MustWaitNavigation()
-	err = page.Navigate(url)
-	if err != nil {
-		return nil, err
-	}
-	log.Println("Connected to the page, rendering...")
-	waitFunc()
-	log.Println("Page rendered!")
-	return page, nil
 }
 
 // Extracts the name and the synergy of the card from the text
@@ -92,8 +58,8 @@ func toCardMap(data map[string]int) (map[*Card]int, error) {
 }
 
 // Returns the map of cards id to synergy
-func reccomendCards(cardID string, offline bool) (map[*Card]int, error) {
-	log.Printf("Searching the best cards for %s", cardID)
+func recommendCards(cardID string, offline bool) (map[*Card]int, error) {
+	logger.Printf("Searching the best cards for %s", cardID)
 	var err error
 	// check if the data exists locally
 	data, has := edhrecData[cardID]
@@ -101,26 +67,25 @@ func reccomendCards(cardID string, offline bool) (map[*Card]int, error) {
 		return toCardMap(data)
 	}
 	if !has && offline {
-		return nil, fmt.Errorf("mtgsdk - can't reccomend cards for %s: no local data", cardID)
+		return nil, fmt.Errorf("mtgsdk - can't recommend cards for %s: no local data", cardID)
 	}
 	// data doesn't exist locally, fetching for it online
 	// init the browser
-	if browser == nil {
-		err = initBrowser()
-		if err != nil {
-			return nil, err
-		}
+	err = initBrowser()
+	if err != nil {
+		return nil, err
 	}
 	card, err := GetCard(cardID)
 	if err != nil {
 		return nil, err
 	}
 	url := commanderURL(card.Name)
-	log.Printf("Accessing %s...", url)
+	logger.Printf("Accessing %s...", url)
 
 	var cardElems rod.Elements
 	var page *rod.Page
 	// access the page
+	rc := 0
 	for {
 		page, err = nav(url)
 		if err != nil {
@@ -131,11 +96,18 @@ func reccomendCards(cardID string, offline bool) (map[*Card]int, error) {
 		if len(cardElems) > 1 {
 			break
 		}
+		if len(cardElems) == 0 {
+			return nil, fmt.Errorf("mtgsdk - bad url")
+		}
+		rc++
+		if rc == renderLimit {
+			return nil, fmt.Errorf("mtgsdk - can't find cards for %s (page not rendered %d times)", card.Name, rc)
+		}
 	}
 	cardElems = cardElems[1:] // Skip the first element - it's the commander itself
 	defer page.MustClose()
 	amount := len(cardElems)
-	log.Printf("Found %d cards", amount)
+	logger.Printf("Found %d cards", amount)
 	result := make(map[string]int, amount)
 	for _, card := range cardElems {
 		text, err := card.Text()
@@ -143,40 +115,45 @@ func reccomendCards(cardID string, offline bool) (map[*Card]int, error) {
 			return nil, err
 		}
 		name, synergy, err := extractNameAndSynergy(text)
-		// log.Printf("Extracted card: %s (%d)", name, synergy)
+		// logger.Printf("Extracted card: %s (%d)", name, synergy)
 		if err != nil {
 			return nil, err
 		}
-		cards, err := GetCards(map[string]string{CardNameKey: name}, offline)
+		card, err := GetCardWithExactName(name)
 		if err != nil {
 			return nil, err
 		}
-		card := cards[0]
 		result[card.ID] = synergy
 	}
-	log.Printf("Card stats for %s loaded!", card.Name)
+	logger.Printf("Card stats for %s loaded!", card.Name)
+	mutex.Lock()
 	// save locally
 	edhrecData[cardID] = result
 	err = saveEDHRECData()
 	if err != nil {
+		mutex.Unlock()
 		return nil, err
 	}
+	mutex.Unlock()
 	return toCardMap(result)
 }
 
 // Returns a slice of all commander staple cards (according to edhrec.com)
-func GetEDHRECStaples(offline bool) ([]Card, error) {
-	if offline {
+func GetEDHRECStaples() ([]Card, error) {
+	exists, err := adm.FileExists(edhrecStaplesFile)
+	if err != nil {
+		return nil, err
+	}
+	if exists {
 		return getLocalEDHRECStaples()
 	}
-	var err error
 	if browser == nil {
 		err = initBrowser()
 		if err != nil {
 			return nil, err
 		}
 	}
-	log.Printf("Accessing %s", staplesURL)
+	logger.Printf("Accessing %s", staplesURL)
 	var cardElems rod.Elements
 	var page *rod.Page
 	// access the page
@@ -197,7 +174,7 @@ func GetEDHRECStaples(offline bool) ([]Card, error) {
 	}
 	defer page.MustClose()
 	amount := len(cardElems)
-	log.Printf("Found %d cards", amount)
+	logger.Printf("Found %d cards", amount)
 	result := []Card{}
 	for _, card := range cardElems {
 		text, err := card.Text()
@@ -209,14 +186,11 @@ func GetEDHRECStaples(offline bool) ([]Card, error) {
 			continue
 		}
 		cardName := lines[3]
-		cards, err := GetCards(map[string]string{CardNameKey: cardName}, offline)
+		card, err := GetCardWithExactName(cardName)
 		if err != nil {
 			return nil, err
 		}
-		if len(cards) == 0 {
-			continue
-		}
-		result = append(result, cards[0])
+		result = append(result, card)
 	}
 	err = saveEDHRECStaples(result)
 	return result, err
@@ -246,7 +220,7 @@ func saveEDHRECStaples(cards []Card) error {
 	for i, card := range cards {
 		ids[i] = card.ID
 	}
-	data, err := json.MarshalIndent(ids, "", "\t")
+	data, err := json.Marshal(ids)
 	if err != nil {
 		return err
 	}
