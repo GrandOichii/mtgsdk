@@ -15,6 +15,7 @@ const (
 	staplesURL         = "https://edhrec.com/top"           // The url for searching for staples
 
 	cardSelector = "div[class^=\"Card_container__\"]" // The selector for card elements
+	// cardSelector = ".Card_name__1MYwa"
 
 	renderLimit = 6
 )

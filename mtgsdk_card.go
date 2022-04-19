@@ -249,7 +249,7 @@ func (c Card) Matches(params map[string]string) bool {
 	for key, value := range params {
 		switch key {
 		case CardNameKey:
-			if !strings.Contains(c.Name, value) {
+			if !strings.Contains(strings.ToLower(c.Name), strings.ToLower(value)) {
 				return false
 			}
 		case SetNameKey:
